@@ -1,0 +1,97 @@
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.exceptions import InvalidSignature
+import random
+
+class RingSignature:
+    def __init__(self, ring, message):
+        self.ring = ring  # List of public keys
+        self.message = message
+
+    def sign(self, signer_index):
+        # Pick a random index for the signer
+        n = len(self.ring)
+        if not (0 <= signer_index < n):
+            raise ValueError("Invalid signer index")
+
+        # Generate a new ECDSA key pair for the signer
+        private_key = ec.generate_private_key(ec.SECP256K1())
+        public_key = private_key.public_key()
+
+        # Prepare the message hash
+        message_hash = hashes.Hash(hashes.SHA256())
+        message_hash.update(self.message.encode())
+        digest = message_hash.finalize()
+
+        # Start signing
+        r = random.randint(1, pow(2, 256))  # Random value
+        R = r * ec.SECP256K1().generator  # R point
+
+        c = digest  # Initial commitment
+        C = [None] * n
+        C[signer_index] = (r, R)
+
+        for i in range(n):
+            if i == signer_index:
+                continue
+            e = random.randint(1, pow(2, 256))  # Random value
+            E = e * ec.SECP256K1().generator  # E point
+            C[i] = (e, E)
+
+        # Compute the final signature
+        s = (c, C)
+
+        return s, public_key
+
+    @staticmethod
+    def verify(signature, message, ring):
+        c, C = signature
+
+        # Prepare the message hash
+        message_hash = hashes.Hash(hashes.SHA256())
+        message_hash.update(message.encode())
+        digest = message_hash.finalize()
+
+        # Verify each component of the ring signature
+        for i in range(len(ring)):
+            r, R = C[i]
+
+            if i == 0:
+                c_prime = digest
+            else:
+                e, E = C[i-1]
+                c_prime = hashes.Hash(hashes.SHA256())
+                c_prime.update(bytes.fromhex(E.public_bytes(encoding=serialization.Encoding.X962, format=serialization.PublicFormat.CompressedPoint).hex()))
+                c_prime.update(bytes.fromhex(digest))
+                c_prime = c_prime.finalize()
+
+            if c != c_prime:
+                return False
+
+        return True
+
+# Example usage
+if __name__ == "__main__":
+    # Create a ring of public keys (simulating blockchain addresses)
+    public_keys = []
+    for _ in range(5):
+        private_key = ec.generate_private_key(ec.SECP256K1())
+        public_key = private_key.public_key()
+        public_keys.append(public_key)
+
+    # Create a message to sign
+    message = "Hello, Blockchain Privacy Tools!"
+
+    # Sign the message with a random signer index
+    signer_index = random.randint(0, len(public_keys) - 1)
+    ring_signature = RingSignature(public_keys, message)
+    signature, public_key = ring_signature.sign(signer_index)
+    print(f"Message signed by: {public_key.public_bytes(encoding=serialization.Encoding.X962, format=serialization.PublicFormat.CompressedPoint).hex()}")
+
+    # Verify the signature
+    is_valid = RingSignature.verify(signature, message, public_keys)
+    if is_valid:
+        print("Signature is valid!")
+    else:
+        print("Signature verification failed!")
